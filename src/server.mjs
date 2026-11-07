@@ -216,10 +216,11 @@ async function resolveTidalStream(trackId, quality) {
   const requested = String(quality || "max").toLowerCase();
   const requestedFormats = requested === "hires" ? ["FLAC_HIRES"] : ["FLAC_HIRES", "FLAC"];
   const params = new URLSearchParams({
-    adaptive: "false",
+    adaptive: "true",
     manifestType: "MPEG_DASH",
     uriScheme: "HTTPS",
     usage: "PLAYBACK"
+    countryCode: COUNTRY,
   });
   for (const format of requestedFormats) params.append("formats", format);
 
