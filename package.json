@@ -1,0 +1,18 @@
+{
+  "name": "bitchord-tidal-lossless-addon",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "TIDAL catalog + eligible unencrypted FLAC manifests for BitChord HTTP Addons",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0"
+  }
+}

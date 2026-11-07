@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: bitchord-tidal-lossless
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: TIDAL_CLIENT_ID
+        sync: false
+      - key: TIDAL_CLIENT_SECRET
+        sync: false
+      - key: TIDAL_COUNTRY_CODE
+        value: ID
