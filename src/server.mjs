@@ -1,8 +1,11 @@
 import "dotenv/config";
 import express from "express";
+import { createBitChordAuth } from "./bitchord-addon-auth.mjs";
 
 const app = express();
 app.disable("x-powered-by");
+
+const bitchord = createBitChordAuth({ hosts: ["bitchord-tidal-lossless.vercel.app"] });
 
 const PORT = Number(process.env.PORT || 8787);
 const COUNTRY = (process.env.TIDAL_COUNTRY_CODE || "ID").toUpperCase();
@@ -15,6 +18,7 @@ const manifest = {
   version: "0.2.0",
   description: "TIDAL catalogue search with lossless and Hi-Res FLAC DASH playback when the official API returns an unencrypted, full-track rendition.",
   resources: ["search", "stream"],
+  bitchordAuth: true,
   allowDownloads: 0,
   checkValidLossless: 1,
   settings: [
@@ -30,9 +34,6 @@ const manifest = {
       ]
     }
   ]
-  // The manifest deliberately omits bitchordAuth until the official
-  // BitChord verifier is installed and configured for the final hostname.
-  // Without it BitChord still works, but labels the addon as outdated.
 };
 
 let tokenCache = { accessToken: null, expiresAt: 0 };
@@ -287,6 +288,8 @@ function handleError(res, error, label) {
 app.get(["/", "/manifest.json"], (_req, res) => {
   res.set("Cache-Control", "public, max-age=600").json(manifest);
 });
+
+app.use(bitchord.express());
 
 app.get("/search", async (req, res) => {
   const query = String(req.query.q || "").trim().slice(0, 256);
