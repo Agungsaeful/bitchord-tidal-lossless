@@ -6,7 +6,10 @@ import { createBitChordAuth } from "./bitchord-addon-auth.mjs";
 const app = express();
 app.disable("x-powered-by");
 
-// Configuration
+// ==========================================
+// CONFIGURATION
+// ==========================================
+
 const PORT = Number(process.env.PORT || 8787);
 const COUNTRY = (process.env.TIDAL_COUNTRY_CODE || "ID").toUpperCase();
 
@@ -14,20 +17,18 @@ const TIDAL_API = "https://openapi.tidal.com/v2";
 const TOKEN_URL = "https://auth.tidal.com/v1/oauth2/token";
 
 // BitChord authentication
-const ADDON_HOSTS = (process.env.ADDON_HOSTS || "")
-  .split(",")
-  .map((host) => host.trim())
-  .filter(Boolean);
-
 const bitchord = createBitChordAuth({
-  hosts: ADDON_HOSTS
+  hosts: ["bitchord-tidal-lossless.vercel.app"]
 });
 
-// Addon manifest
+// ==========================================
+// MANIFEST
+// ==========================================
+
 const manifest = {
   id: "dev.agung.bitchord.tidal-lossless",
   name: "TIDAL Lossless",
-  version: "0.2.1",
+  version: "0.2.3",
   description:
     "TIDAL catalogue search with lossless and Hi-Res FLAC playback when an eligible unencrypted rendition is available.",
   resources: ["search", "stream"],
@@ -49,17 +50,22 @@ const manifest = {
   ]
 };
 
-// Token cache
+// ==========================================
+// CACHE
+// ==========================================
+
 let tokenCache = {
   accessToken: null,
   expiresAt: 0
 };
 
-// Search cache
 const searchCache = new Map();
 const SEARCH_TTL_MS = 10 * 60 * 1000;
 
-// Helpers
+// ==========================================
+// ERROR HANDLER
+// ==========================================
+
 function apiError(status, message, retryAfter) {
   const error = new Error(message);
   error.status = status;
@@ -71,8 +77,41 @@ function apiError(status, message, retryAfter) {
   return error;
 }
 
+function handleError(res, error, label) {
+  console.error(`[${label}]`, error);
+
+  if (error.status === 429) {
+    if (error.retryAfter) {
+      res.set("Retry-After", String(error.retryAfter));
+    }
+
+    return res.status(429).json({
+      error: "tidal_rate_limited",
+      message: error.message
+    });
+  }
+
+  if (error.status === 404) {
+    return res.status(404).json({
+      error: "stream_unavailable",
+      message: error.message
+    });
+  }
+
+  return res.status(502).json({
+    error: "tidal_upstream_error",
+    message: error.message
+  });
+}
+
+// ==========================================
+// HELPERS
+// ==========================================
+
 function parseIsoDuration(value) {
-  if (typeof value !== "string") return undefined;
+  if (typeof value !== "string") {
+    return undefined;
+  }
 
   const match = value.match(
     /^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/
@@ -94,7 +133,9 @@ function parseIsoDuration(value) {
 }
 
 function relationIds(resource, name) {
-  return (resource?.relationships?.[name]?.data || [])
+  return (
+    resource?.relationships?.[name]?.data || []
+  )
     .map((item) => item?.id)
     .filter(Boolean);
 }
@@ -104,10 +145,13 @@ function resourceKey(resource) {
 }
 
 function httpsUrl(value) {
-  if (typeof value !== "string") return undefined;
+  if (typeof value !== "string") {
+    return undefined;
+  }
 
   try {
     const url = new URL(value);
+
     return url.protocol === "https:"
       ? url.toString()
       : undefined;
@@ -120,7 +164,9 @@ function artworkUrl(artwork) {
   const files = artwork?.attributes?.files || [];
 
   const sorted = [...files].sort(
-    (a, b) => (b?.meta?.width || 0) - (a?.meta?.width || 0)
+    (a, b) =>
+      (b?.meta?.width || 0) -
+      (a?.meta?.width || 0)
   );
 
   for (const file of sorted) {
@@ -133,8 +179,9 @@ function artworkUrl(artwork) {
 }
 
 function hasLosslessTag(track) {
-  const tags = (track?.attributes?.mediaTags || [])
-    .map((tag) => String(tag).toUpperCase());
+  const tags = (
+    track?.attributes?.mediaTags || []
+  ).map((tag) => String(tag).toUpperCase());
 
   return (
     tags.includes("HIRES_LOSSLESS") ||
@@ -143,8 +190,11 @@ function hasLosslessTag(track) {
 }
 
 function isHiRes(track) {
-  return (track?.attributes?.mediaTags || []).some(
-    (tag) => String(tag).toUpperCase() === "HIRES_LOSSLESS"
+  return (
+    track?.attributes?.mediaTags || []
+  ).some(
+    (tag) =>
+      String(tag).toUpperCase() === "HIRES_LOSSLESS"
   );
 }
 
@@ -187,11 +237,16 @@ function decodeTrackId(encoded) {
   }
 }
 
-// TIDAL OAuth
+// ==========================================
+// TIDAL OAUTH
+// ==========================================
+
 async function getTidalAccessToken() {
   const supplied = process.env.TIDAL_ACCESS_TOKEN;
 
-  if (supplied) return supplied;
+  if (supplied) {
+    return supplied;
+  }
 
   if (
     tokenCache.accessToken &&
@@ -205,7 +260,7 @@ async function getTidalAccessToken() {
 
   if (!clientId || !clientSecret) {
     throw new Error(
-      "TIDAL credentials are missing. Set TIDAL_CLIENT_ID and TIDAL_CLIENT_SECRET."
+      "TIDAL credentials are missing. Configure TIDAL_CLIENT_ID and TIDAL_CLIENT_SECRET."
     );
   }
 
@@ -253,8 +308,14 @@ async function getTidalAccessToken() {
   return tokenCache.accessToken;
 }
 
-// TIDAL API request
-async function tidalGet(path, params = new URLSearchParams()) {
+// ==========================================
+// TIDAL API REQUEST
+// ==========================================
+
+async function tidalGet(
+  path,
+  params = new URLSearchParams()
+) {
   const token = await getTidalAccessToken();
 
   const url = new URL(`${TIDAL_API}${path}`);
@@ -276,14 +337,13 @@ async function tidalGet(path, params = new URLSearchParams()) {
   if (!response.ok) {
     const item = payload?.errors?.[0];
 
-    const detail =
-      item?.detail ||
-      item?.code ||
-      `HTTP ${response.status}`;
-
     throw apiError(
       response.status,
-      `TIDAL API: ${detail}`,
+      `TIDAL API: ${
+        item?.detail ||
+        item?.code ||
+        `HTTP ${response.status}`
+      }`,
       response.headers.get("retry-after")
     );
   }
@@ -291,7 +351,10 @@ async function tidalGet(path, params = new URLSearchParams()) {
   return payload;
 }
 
-// Track mapping
+// ==========================================
+// TRACK MAPPING
+// ==========================================
+
 function mapTrack(track, includedByKey) {
   const albumId = relationIds(track, "albums")[0];
 
@@ -302,7 +365,8 @@ function mapTrack(track, includedByKey) {
   const artistNames = relationIds(track, "artists")
     .map(
       (id) =>
-        includedByKey.get(`artists:${id}`)?.attributes?.name
+        includedByKey.get(`artists:${id}`)
+          ?.attributes?.name
     )
     .filter(Boolean);
 
@@ -319,7 +383,9 @@ function mapTrack(track, includedByKey) {
     title: track.attributes?.title || "",
     artist: artistNames.join(", ") || "Unknown artist",
     album: album?.attributes?.title || "",
-    duration: parseIsoDuration(track.attributes?.duration),
+    duration: parseIsoDuration(
+      track.attributes?.duration
+    ),
     artworkURL: artworkUrl(cover),
     format: "flac",
     audioQuality: hiRes
@@ -328,7 +394,10 @@ function mapTrack(track, includedByKey) {
   };
 }
 
-// Search TIDAL
+// ==========================================
+// TIDAL SEARCH
+// ==========================================
+
 async function searchTidal(query, quality) {
   const params = new URLSearchParams({
     "filter[query]": query,
@@ -342,7 +411,9 @@ async function searchTidal(query, quality) {
     params
   );
 
-  const searchResource = (payload.data || []).find(
+  const searchResource = (
+    payload.data || []
+  ).find(
     (item) => item?.type === "searchResults"
   );
 
@@ -373,8 +444,12 @@ async function searchTidal(query, quality) {
   ).toLowerCase();
 
   let mapped = tracks
-    .map((track) => mapTrack(track, includedByKey))
-    .filter((track) => track.id && track.title);
+    .map((track) =>
+      mapTrack(track, includedByKey)
+    )
+    .filter(
+      (track) => track.id && track.title
+    );
 
   if (requested === "hires") {
     mapped = mapped.filter(
@@ -392,7 +467,10 @@ async function searchTidal(query, quality) {
   return mapped.slice(0, 30);
 }
 
-// Resolve playback stream
+// ==========================================
+// TIDAL STREAM RESOLVER
+// ==========================================
+
 async function resolveTidalStream(trackId, quality) {
   const requested = String(
     quality || "max"
@@ -427,7 +505,9 @@ async function resolveTidalStream(trackId, quality) {
 
   const availableFormats = (
     attributes.formats || []
-  ).map((format) => String(format).toUpperCase());
+  ).map((format) =>
+    String(format).toUpperCase()
+  );
 
   if (attributes.drmData) {
     throw apiError(
@@ -481,7 +561,10 @@ async function resolveTidalStream(trackId, quality) {
   };
 }
 
-// Search cache
+// ==========================================
+// SEARCH CACHE
+// ==========================================
+
 function cacheGet(key) {
   const entry = searchCache.get(key);
 
@@ -510,44 +593,10 @@ function cacheSet(key, value) {
   });
 }
 
-// Error handler
-function handleError(res, error, label) {
-  console.error(`[${label}] ${error.message}`);
+// ==========================================
+// PUBLIC MANIFEST
+// ==========================================
 
-  if (error.status === 429) {
-    if (error.retryAfter) {
-      res.set("Retry-After", String(error.retryAfter));
-    }
-
-    return res
-      .status(429)
-      .set("Cache-Control", "no-store")
-      .json({
-        error: "tidal_rate_limited",
-        message: error.message
-      });
-  }
-
-  if (error.status === 404) {
-    return res
-      .status(404)
-      .set("Cache-Control", "no-store")
-      .json({
-        error: "stream_unavailable",
-        message: error.message
-      });
-  }
-
-  return res
-    .status(502)
-    .set("Cache-Control", "no-store")
-    .json({
-      error: "tidal_upstream_error",
-      message: error.message
-    });
-}
-
-// Public manifest
 app.get(
   ["/", "/manifest.json"],
   (_req, res) => {
@@ -557,11 +606,16 @@ app.get(
   }
 );
 
-// Public health check
+// ==========================================
+// HEALTH CHECK
+// ==========================================
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     addon: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
     source: "TIDAL",
     countryCode: COUNTRY,
     credentialsConfigured: Boolean(
@@ -574,7 +628,10 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// Protected search endpoint
+// ==========================================
+// SEARCH ENDPOINT
+// ==========================================
+
 app.get(
   "/search",
   bitchord.express(),
@@ -588,10 +645,14 @@ app.get(
     ).toLowerCase();
 
     if (!query) {
-      return res.json({ tracks: [] });
+      return res.json({
+        tracks: []
+      });
     }
 
-    if (!["max", "hires", "lossless"].includes(quality)) {
+    if (
+      !["max", "hires", "lossless"].includes(quality)
+    ) {
       return res.status(400).json({
         error: "invalid_quality"
       });
@@ -605,7 +666,9 @@ app.get(
     if (cached) {
       return res
         .set("Cache-Control", "private, max-age=60")
-        .json({ tracks: cached });
+        .json({
+          tracks: cached
+        });
     }
 
     try {
@@ -618,19 +681,30 @@ app.get(
 
       return res
         .set("Cache-Control", "private, max-age=60")
-        .json({ tracks });
+        .json({
+          tracks
+        });
     } catch (error) {
-      return handleError(res, error, "search");
+      return handleError(
+        res,
+        error,
+        "search"
+      );
     }
   }
 );
 
-// Protected stream endpoint
+// ==========================================
+// STREAM ENDPOINT
+// ==========================================
+
 app.get(
   "/stream/:id",
   bitchord.express(),
   async (req, res) => {
-    const trackId = decodeTrackId(req.params.id);
+    const trackId = decodeTrackId(
+      req.params.id
+    );
 
     if (!trackId) {
       return res.status(404).end();
@@ -646,22 +720,27 @@ app.get(
         .set("Cache-Control", "no-store")
         .json(stream);
     } catch (error) {
-      return handleError(res, error, "stream");
+      return handleError(
+        res,
+        error,
+        "stream"
+      );
     }
   }
 );
 
-// 404 handler
+// ==========================================
+// 404 HANDLER
+// ==========================================
+
 app.use((_req, res) => {
   res.status(404).json({
     error: "not_found"
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(
-    `BitChord TIDAL Lossless addon listening on port ${PORT}`
-  );
-});
-      
+// ==========================================
+// VERCEL ENTRYPOINT
+// ==========================================
+
+export default app;
